@@ -1,116 +1,171 @@
-import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig, Service, Characteristic } from 'homebridge';
+import {
+  API,
+  Categories,
+  Characteristic,
+  DynamicPlatformPlugin,
+  Logger,
+  PlatformAccessory,
+  PlatformConfig,
+  Service,
+} from 'homebridge';
 
-import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
-import { ExamplePlatformAccessory } from './platformAccessory';
+import { PLATFORM_NAME, PLUGIN_NAME, TemperatureDisplayUnit } from './settings';
+import {
+  UponorThermostatAccessory,
+} from './accessories/UponorThermostatAccessory';
+import { UponorProxy } from './core/UponorProxy';
+import { UponorDevice } from './devices/UponorDevice';
+import { UponorCoolingMode } from './devices/UponorCoolingMode';
+import {
+  UponorCoolingSwitchAccessory,
+} from './accessories/UponorCoolingSwitchAccessory';
+import { UponorAwayMode } from './devices/UponorAwayMode';
+import {
+  UponorAwaySwitchAccessory,
+} from './accessories/UponorAwaySwitchAccessory';
 
-/**
- * HomebridgePlatform
- * This class is the main constructor for your plugin, this is where you should
- * parse the user config and discover/register accessories with Homebridge.
- */
-export class ExampleHomebridgePlatform implements DynamicPlatformPlugin {
+export class UponorPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
   public readonly Characteristic: typeof Characteristic = this.api.hap.Characteristic;
 
-  // this is used to track restored cached accessories
-  public readonly accessories: PlatformAccessory[] = [];
+  public readonly uponorProxy: UponorProxy;
+
+  public readonly cachedAccessories: PlatformAccessory[] = [];
 
   constructor(
     public readonly log: Logger,
     public readonly config: PlatformConfig,
     public readonly api: API,
   ) {
-    this.log.debug('Finished initializing platform:', this.config.name);
+    this.log.debug('Finished initializing platform:');
+    this.log.debug('  - IP or Host:', this.config.host);
+    this.log.debug('  - Display Unit:', this.config.displayUnit);
 
-    // When this event is fired it means Homebridge has restored all cached accessories from disk.
-    // Dynamic Platform plugins should only register new accessories after this event was fired,
-    // in order to ensure they weren't added to homebridge already. This event can also be used
-    // to start discovery of new accessories.
-    this.api.on('didFinishLaunching', () => {
+    this.uponorProxy = new UponorProxy(
+      this.log,
+      this.config.host,
+      TemperatureDisplayUnit[this.config.displayUnit],
+    );
+
+    this.api.on('didFinishLaunching', async (): Promise<void> => {
       log.debug('Executed didFinishLaunching callback');
-      // run the method to discover / register your devices as accessories
-      this.discoverDevices();
+      await this.discoverDevices();
     });
   }
 
-  /**
-   * This function is invoked when homebridge restores cached accessories from disk at startup.
-   * It should be used to setup event handlers for characteristics and update respective values.
-   */
-  configureAccessory(accessory: PlatformAccessory) {
+  configureAccessory(accessory: PlatformAccessory): void {
     this.log.info('Loading accessory from cache:', accessory.displayName);
-
-    // add the restored accessory to the accessories cache so we can track if it has already been registered
-    this.accessories.push(accessory);
+    this.cachedAccessories.push(accessory);
   }
 
-  /**
-   * This is an example method showing how to register discovered accessories.
-   * Accessories must only be registered once, previously created accessories
-   * must not be registered again to prevent "duplicate UUID" errors.
-   */
-  discoverDevices() {
+  async discoverDevices(): Promise<void> {
+    const devices: UponorDevice[] = await this.uponorProxy.getDevices();
+    this.log.info('Discovered devices:', devices.length);
 
-    // EXAMPLE ONLY
-    // A real plugin you would discover accessories from the local network, cloud services
-    // or a user-defined array in the platform config.
-    const exampleDevices = [
-      {
-        exampleUniqueId: 'ABCD',
-        exampleDisplayName: 'Bedroom',
-      },
-      {
-        exampleUniqueId: 'EFGH',
-        exampleDisplayName: 'Kitchen',
-      },
-    ];
+    const thermostatAccessories: PlatformAccessory[] = [];
 
-    // loop over the discovered devices and register each one if it has not already been registered
-    for (const device of exampleDevices) {
-
-      // generate a unique id for the accessory this should be generated from
-      // something globally unique, but constant, for example, the device serial
-      // number or MAC address
-      const uuid = this.api.hap.uuid.generate(device.exampleUniqueId);
-
-      // see if an accessory with the same uuid has already been registered and restored from
-      // the cached devices we stored in the `configureAccessory` method above
-      const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
+    for (const device of devices) {
+      const uuid: string = this.api.hap.uuid.generate(device.id);
+      const existingAccessory: PlatformAccessory | undefined = this.cachedAccessories.find(
+        (accessory: PlatformAccessory): boolean => accessory.UUID === uuid,
+      );
 
       if (existingAccessory) {
-        // the accessory already exists
         this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
 
-        // if you need to update the accessory.context then you should run `api.updatePlatformAccessories`. eg.:
-        // existingAccessory.context.device = device;
-        // this.api.updatePlatformAccessories([existingAccessory]);
+        existingAccessory.context = device;
+        this.api.updatePlatformAccessories([existingAccessory]);
 
-        // create the accessory handler for the restored accessory
-        // this is imported from `platformAccessory.ts`
-        new ExamplePlatformAccessory(this, existingAccessory);
-
-        // it is possible to remove platform accessories at any time using `api.unregisterPlatformAccessories`, eg.:
-        // remove platform accessories when no longer present
-        // this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [existingAccessory]);
-        // this.log.info('Removing existing accessory from cache:', existingAccessory.displayName);
+        thermostatAccessories.push(existingAccessory);
+        new UponorThermostatAccessory(this, existingAccessory as PlatformAccessory<UponorDevice>);
       } else {
-        // the accessory does not yet exist, so we need to create it
-        this.log.info('Adding new accessory:', device.exampleDisplayName);
+        this.log.info('Adding new accessory:', device.name);
 
-        // create a new accessory
-        const accessory = new this.api.platformAccessory(device.exampleDisplayName, uuid);
+        const accessory: PlatformAccessory<UponorDevice> = new this.api.platformAccessory(
+          device.name,
+          uuid,
+          Categories.THERMOSTAT,
+        );
 
-        // store a copy of the device object in the `accessory.context`
-        // the `context` property can be used to store any data about the accessory you may need
-        accessory.context.device = device;
+        accessory.context = device;
 
-        // create the accessory handler for the newly create accessory
-        // this is imported from `platformAccessory.ts`
-        new ExamplePlatformAccessory(this, accessory);
+        thermostatAccessories.push(accessory);
+        new UponorThermostatAccessory(this, accessory);
 
-        // link the accessory to your platform
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }
+    }
+
+    const coolingMode: UponorCoolingMode = await this.uponorProxy.getCoolingMode();
+    const coolingUuid: string = this.api.hap.uuid.generate('cooling-mode-switch');
+    const existingCoolingAccessory: PlatformAccessory | undefined = this.cachedAccessories.find(
+      (accessory: PlatformAccessory): boolean => accessory.UUID === coolingUuid,
+    );
+    if (existingCoolingAccessory) {
+      this.log.info('Restoring existing accessory from cache:', existingCoolingAccessory.displayName);
+
+      existingCoolingAccessory.context = coolingMode;
+      this.api.updatePlatformAccessories([existingCoolingAccessory]);
+
+      new UponorCoolingSwitchAccessory(
+        this,
+        existingCoolingAccessory as PlatformAccessory<UponorCoolingMode>,
+        thermostatAccessories as PlatformAccessory<UponorDevice>[],
+      );
+    } else {
+      this.log.info('Adding new accessory:', 'Modo frío');
+
+      const accessory: PlatformAccessory<UponorCoolingMode> = new this.api.platformAccessory(
+        'Modo frío',
+        coolingUuid,
+        Categories.SWITCH,
+      );
+
+      accessory.context = coolingMode;
+
+      new UponorCoolingSwitchAccessory(
+        this,
+        accessory,
+        thermostatAccessories as PlatformAccessory<UponorDevice>[],
+      );
+
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    }
+
+    const awayMode: UponorAwayMode = await this.uponorProxy.getAwayMode();
+    const awayUuid: string = this.api.hap.uuid.generate('away-mode-switch');
+    const existingAwayAccessory: PlatformAccessory | undefined = this.cachedAccessories.find(
+      (accessory: PlatformAccessory): boolean => accessory.UUID === awayUuid,
+    );
+    if (existingAwayAccessory) {
+      this.log.info('Restoring existing accessory from cache:', existingAwayAccessory.displayName);
+
+      existingAwayAccessory.context = awayMode;
+      this.api.updatePlatformAccessories([existingAwayAccessory]);
+
+      new UponorAwaySwitchAccessory(
+        this,
+        existingAwayAccessory as PlatformAccessory<UponorAwayMode>,
+        thermostatAccessories as PlatformAccessory<UponorDevice>[],
+      );
+    } else {
+      this.log.info('Adding new accessory:', 'Modo vacaciones');
+
+      const accessory: PlatformAccessory<UponorAwayMode> = new this.api.platformAccessory(
+        'Modo vacaciones',
+        awayUuid,
+        Categories.SWITCH,
+      );
+
+      accessory.context = awayMode;
+
+      new UponorAwaySwitchAccessory(
+        this,
+        accessory,
+        thermostatAccessories as PlatformAccessory<UponorDevice>[],
+      );
+
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
     }
   }
 }

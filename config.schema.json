@@ -1,15 +1,23 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "UponorPlatform",
   "pluginType": "platform",
   "singular": true,
   "schema": {
     "type": "object",
     "properties": {
-      "name": {
-        "title": "Name",
+      "host": {
+        "title": "IP or Hostname",
+        "type": "string",
+        "required": true
+      },
+      "displayUnit": {
+        "title": "Display Unit",
         "type": "string",
         "required": true,
-        "default": "Example Dynamic Platform"
+        "enum": [
+          "CELSIUS",
+          "FAHRENHEIT"
+        ]
       }
     }
   }

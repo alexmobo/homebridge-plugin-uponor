@@ -1,5 +1,4 @@
 {
-  "private": true,
   "displayName": "Uponor Plugin",
   "name": "homebridge-plugin-uponor",
   "version": "1.0.0",

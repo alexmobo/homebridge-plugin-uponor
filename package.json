@@ -27,7 +27,7 @@
     "uponor"
   ],
   "dependencies": {
-    "async-mutex": "^0.4.0",
+    "async-mutex": "^0.5.0",
     "axios": "^1.6.0",
     "bignumber.js": "^9.1.2"
   },
